@@ -41,6 +41,8 @@ const (
 	// https://github.com/openvex/spec and the attestation spec is found here:
 	// https://github.com/openvex/spec/blob/main/ATTESTING.md
 	OpenVexNamespace = "https://openvex.dev/ns"
+
+	PredicateSLSAVSA = "https://slsa.dev/verification_summary/v1"
 )
 
 // CosignPredicate specifies the format of the Custom Predicate.

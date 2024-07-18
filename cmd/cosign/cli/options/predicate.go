@@ -39,6 +39,7 @@ const (
 	PredicateLink      = "link"
 	PredicateVuln      = "vuln"
 	PredicateOpenVEX   = "openvex"
+	PredicateSLSAVSA   = "vsa"
 )
 
 // PredicateTypeMap is the mapping between the predicate `type` option to predicate URI.
@@ -53,6 +54,7 @@ var PredicateTypeMap = map[string]string{
 	PredicateLink:      in_toto.PredicateLinkV1,
 	PredicateVuln:      attestation.CosignVulnProvenanceV01,
 	PredicateOpenVEX:   attestation.OpenVexNamespace,
+	PredicateSLSAVSA:   attestation.PredicateSLSAVSA,
 }
 
 // PredicateOptions is the wrapper for predicate related options.

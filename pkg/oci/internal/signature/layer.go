@@ -149,3 +149,28 @@ func (s *sigLayer) RFC3161Timestamp() (*bundle.RFC3161Timestamp, error) {
 	}
 	return &b, nil
 }
+
+type oci11IntotoDSSESignature struct {
+	sigLayer
+}
+
+var _ oci.Signature = (*oci11IntotoDSSESignature)(nil)
+var _ v1.Layer = (*sigLayer)(nil)
+
+func NewOCI11Signature(s oci.Signature) oci.Signature {
+	return &oci11IntotoDSSESignature{sigLayer: *s.(*sigLayer)}
+}
+
+// Signature implements oci.Signature
+func (s *oci11IntotoDSSESignature) Signature() ([]byte, error) {
+	b64sig, err := s.Base64Signature()
+	if err != nil {
+		return nil, err
+	}
+	return base64.StdEncoding.DecodeString(b64sig)
+}
+
+// Base64Signature implements oci.Signature
+func (s *oci11IntotoDSSESignature) Base64Signature() (string, error) {
+	return "", nil
+}

@@ -52,3 +52,20 @@ func TestVerifyAttestationMissingIssuer(t *testing.T) {
 		t.Fatal("verifyAttestation expected 'need --certificate-oidc-issuer'")
 	}
 }
+
+func TestVerifyDockerAttestation(t *testing.T) {
+	ctx := context.Background()
+
+	verifyAttestation := VerifyAttestationCommand{
+		KeyRef:            "staging.pem",
+		IgnoreSCT:         true,
+		IgnoreTlog:        true,
+		ExperimentalOCI11: true,
+		PredicateType:     "spdx",
+	}
+
+	err := verifyAttestation.Exec(ctx, []string{"docker/go-tuf-mirror:0.2.1"})
+	if err != nil {
+		t.Fatalf("verifyAttestation failed: %v", err)
+	}
+}

@@ -16,6 +16,11 @@
 package layout
 
 import (
+	"encoding/json"
+	"fmt"
+
+	intoto "github.com/in-toto/in-toto-golang/in_toto"
+
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/sigstore/cosign/v2/pkg/oci"
 	"github.com/sigstore/cosign/v2/pkg/oci/internal/signature"
@@ -48,4 +53,42 @@ func (s *sigs) Get() ([]oci.Signature, error) {
 		signatures = append(signatures, signature.New(l, desc))
 	}
 	return signatures, nil
+}
+
+type oci11IntotoDSSESignatures struct {
+	oci.Signatures
+}
+
+var _ oci.Signatures = (*oci11IntotoDSSESignatures)(nil)
+
+func NewOCI11Signatures(s oci.Signatures) oci.Signatures {
+	return &oci11IntotoDSSESignatures{s}
+}
+
+func (s *oci11IntotoDSSESignatures) Get() ([]oci.Signature, error) {
+	sigs, err := s.Signatures.Get()
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := s.Signatures.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	// unmarshall into generic map and check for ArtifactType at the top level
+	var m map[string]interface{}
+	if err := json.Unmarshal(manifest, &m); err != nil {
+		return nil, err
+	}
+	artifactType, ok := m["artifactType"]
+	if !ok {
+		return nil, fmt.Errorf("no artifactType found in manifest")
+	}
+	if artifactType != intoto.PayloadType {
+		return nil, fmt.Errorf("expected artifactType %s, got %s", intoto.PayloadType, artifactType)
+	}
+	result := make([]oci.Signature, 0)
+	for _, sig := range sigs {
+		result = append(result, signature.NewOCI11Signature(sig))
+	}
+	return result, nil
 }
