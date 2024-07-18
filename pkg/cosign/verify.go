@@ -34,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/platforms"
 	"github.com/pkg/errors"
 
 	"github.com/digitorus/timestamp"
@@ -49,6 +50,7 @@ import (
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 
 	ssldsse "github.com/secure-systems-lab/go-securesystemslib/dsse"
@@ -193,7 +195,11 @@ func verifyOCIAttestation(ctx context.Context, verifier signature.Verifier, att 
 			fmt.Errorf("invalid payloadType %s on envelope. Expected %s", env.PayloadType, types.IntotoPayloadType),
 		}
 	}
-	dssev, err := ssldsse.NewEnvelopeVerifier(&dsse.VerifierAdapter{SignatureVerifier: verifier})
+	// otherwise nil is returned when adapter.Public() is called later
+	adapter := &dsse.VerifierAdapter{SignatureVerifier: verifier}
+	adapter.Pub = verifier.PublicKey
+
+	dssev, err := ssldsse.NewEnvelopeVerifier(adapter)
 	if err != nil {
 		return err
 	}
@@ -884,10 +890,62 @@ func VerifyImageAttestations(ctx context.Context, signedImgRef name.Reference, c
 		return nil, false, errors.New("one of verifier or root certs is required")
 	}
 
-	// This is a carefully optimized sequence for fetching the attestations of
-	// the entity that minimizes registry requests when supplied with a digest
-	// input.
-	digest, err := ociremote.ResolveDigest(signedImgRef, co.RegistryClientOpts...)
+	if co.ExperimentalOCI11 {
+		return verifyAttestationSignaturesExperimentalOCI(ctx, signedImgRef, co)
+	} else {
+		// This is a carefully optimized sequence for fetching the attestations of
+		// the entity that minimizes registry requests when supplied with a digest
+		// input.
+		digest, err := ociremote.ResolveDigest(signedImgRef, co.RegistryClientOpts...)
+		if err != nil {
+			return nil, false, err
+		}
+		h, err := v1.NewHash(digest.Identifier())
+		if err != nil {
+			return nil, false, err
+		}
+		st, err := ociremote.AttestationTag(digest, co.RegistryClientOpts...)
+		if err != nil {
+			return nil, false, err
+		}
+		atts, err := ociremote.Signatures(st, co.RegistryClientOpts...)
+		if err != nil {
+			return nil, false, err
+		}
+
+		return VerifyImageAttestation(ctx, atts, h, co)
+	}
+}
+
+// verifyImageSignaturesExperimentalOCI does all the main cosign checks in a loop, returning the verified signatures.
+// If there were no valid signatures, we return an error, using OCI 1.1+ behavior.
+func verifyAttestationSignaturesExperimentalOCI(ctx context.Context, signedImgRef name.Reference, co *CheckOpts) (checkedSignatures []oci.Signature, bundleVerified bool, err error) {
+	// Enforce this up front.
+	if co.RootCerts == nil && co.SigVerifier == nil {
+		return nil, false, errors.New("one of verifier or root certs is required")
+	}
+
+	// This is a carefully optimized sequence for fetching the signatures of the
+	// entity that minimizes registry requests when supplied with a digest input
+	platform, err := ParsePlatform("")
+	if err != nil {
+		return nil, false, err
+	}
+	popt := remote.WithPlatform(*platform)
+
+	image, err := remote.Image(signedImgRef, popt)
+	var digest name.Digest
+	if err != nil {
+		opts := append(co.RegistryClientOpts, ociremote.WithRemoteOptions(popt))
+		digest, err = ociremote.ResolveDigest(signedImgRef, opts...)
+	} else {
+		d, err := image.Digest()
+		if err != nil {
+			return nil, false, err
+		}
+		digest = signedImgRef.Context().Digest(d.String())
+	}
+
 	if err != nil {
 		return nil, false, err
 	}
@@ -895,16 +953,52 @@ func VerifyImageAttestations(ctx context.Context, signedImgRef name.Reference, c
 	if err != nil {
 		return nil, false, err
 	}
-	st, err := ociremote.AttestationTag(digest, co.RegistryClientOpts...)
-	if err != nil {
-		return nil, false, err
-	}
-	atts, err := ociremote.Signatures(st, co.RegistryClientOpts...)
-	if err != nil {
-		return nil, false, err
-	}
 
-	return VerifyImageAttestation(ctx, atts, h, co)
+	var sigs oci.Signatures
+	sigRef := co.SignatureRef
+	if sigRef == "" {
+		artifactType := ociexperimental.ArtifactType("intoto")
+		index, err := ociremote.Referrers(digest, artifactType, co.RegistryClientOpts...)
+		if err != nil {
+			return nil, false, err
+		}
+		results := index.Manifests
+		numResults := len(results)
+		if numResults == 0 {
+			return nil, false, fmt.Errorf("unable to locate reference with artifactType %s", artifactType)
+		} else if numResults > 1 {
+			// TODO: if there is more than 1 result.. what does that even mean?
+			ui.Warnf(ctx, "there were a total of %d references with artifactType %s\n", numResults, artifactType)
+		}
+		// TODO: do this smarter using "created" annotations
+		lastResult := results[numResults-1]
+		st, err := name.ParseReference(fmt.Sprintf("%s@%s", digest.Repository, lastResult.Digest.String()))
+		if err != nil {
+			return nil, false, err
+		}
+		sigs, err = ociremote.Signatures(st, co.RegistryClientOpts...)
+		if err != nil {
+			return nil, false, err
+		}
+		sigs = layout.NewOCI11Signatures(sigs)
+	}
+	return VerifyImageAttestation(ctx, sigs, h, co)
+}
+
+func ParsePlatform(platformStr string) (*v1.Platform, error) {
+	if platformStr == "" {
+		cdp := platforms.Normalize(platforms.DefaultSpec())
+		if cdp.OS != "windows" {
+			cdp.OS = "linux"
+		}
+		return &v1.Platform{
+			OS:           cdp.OS,
+			Architecture: cdp.Architecture,
+			Variant:      cdp.Variant,
+		}, nil
+	} else {
+		return v1.ParsePlatform(platformStr)
+	}
 }
 
 // VerifyLocalImageAttestations verifies attestations from a saved, local image, without any network calls,

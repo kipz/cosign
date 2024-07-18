@@ -70,6 +70,7 @@ type VerifyAttestationCommand struct {
 	IgnoreTlog                   bool
 	MaxWorkers                   int
 	UseSignedTimestamps          bool
+	ExperimentalOCI11            bool
 }
 
 func (c *VerifyAttestationCommand) loadTSACertificates(ctx context.Context) (*cosign.TSACertificates, error) {
@@ -119,6 +120,7 @@ func (c *VerifyAttestationCommand) Exec(ctx context.Context, images []string) (e
 		Offline:                      c.Offline,
 		IgnoreTlog:                   c.IgnoreTlog,
 		MaxWorkers:                   c.MaxWorkers,
+		ExperimentalOCI11:            c.ExperimentalOCI11,
 	}
 	if c.CheckClaims {
 		co.ClaimVerifier = cosign.IntotoSubjectClaimVerifier
@@ -276,6 +278,7 @@ func (c *VerifyAttestationCommand) Exec(ctx context.Context, images []string) (e
 		// that we can help the user figure out if there's a typo, etc.
 		checkedPredicateTypes := []string{}
 		for _, vp := range verified {
+			return errors.New("xxxx")
 			payload, gotPredicateType, err := policy.AttestationToPayloadJSON(ctx, c.PredicateType, vp)
 			if err != nil {
 				return fmt.Errorf("converting to consumable policy validation: %w", err)

@@ -21,5 +21,9 @@ import (
 
 // ArtifactType converts a attachment name (sig/sbom/att/etc.) into a valid artifactType (OCI 1.1+).
 func ArtifactType(attName string) string {
-	return fmt.Sprintf("application/vnd.dev.cosign.artifact.%s.v1+json", attName)
+	if attName == "intoto" {
+		return "application/vnd.in-toto+json"
+	} else {
+		return fmt.Sprintf("application/vnd.dev.cosign.artifact.%s.v1+json", attName)
+	}
 }
