@@ -278,7 +278,6 @@ func (c *VerifyAttestationCommand) Exec(ctx context.Context, images []string) (e
 		// that we can help the user figure out if there's a typo, etc.
 		checkedPredicateTypes := []string{}
 		for _, vp := range verified {
-			return errors.New("xxxx")
 			payload, gotPredicateType, err := policy.AttestationToPayloadJSON(ctx, c.PredicateType, vp)
 			if err != nil {
 				return fmt.Errorf("converting to consumable policy validation: %w", err)
